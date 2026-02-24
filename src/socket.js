@@ -19,6 +19,7 @@ const initSocket = (httpServer) => {
       if (!user) return next(new Error('User not found'));
       socket.userId = decoded.id;
       socket.isAdmin = user.role === 'admin';
+      socket.isManager = user.role === 'manager';
       next();
     } catch (err) {
       next(new Error('Invalid token'));
@@ -28,7 +29,7 @@ const initSocket = (httpServer) => {
   io.on('connection', (socket) => {
     const userId = socket.userId;
     socket.join(`user:${userId}`);
-    if (socket.isAdmin) socket.join('admin');
+    if (socket.isAdmin || socket.isManager) socket.join('admin');
     socket.emit('connected', { userId });
   });
 

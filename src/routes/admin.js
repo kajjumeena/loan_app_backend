@@ -5,20 +5,16 @@ const EMI = require('../models/EMI');
 const Notification = require('../models/Notification');
 const AppSettings = require('../models/AppSettings');
 const { getIO } = require('../socket');
-const { protect, adminOnly } = require('../middleware/auth');
+const { protect, adminOnly, staffOnly } = require('../middleware/auth');
 const { generateEMISchedule, getLoanStats, processOverdueEMIs } = require('../services/emiCalculator');
 const { sendPushNotification } = require('../utils/pushNotifications');
 
 const router = express.Router();
 
-// Apply auth middleware to all admin routes
-router.use(protect);
-router.use(adminOnly);
-
 // @route   POST /api/admin/users
 // @desc    Create a new user or admin
 // @access  Admin
-router.post('/users', async (req, res) => {
+router.post('/users', protect, adminOnly, async (req, res) => {
   try {
     const { email, name, mobile, role } = req.body;
 
@@ -32,7 +28,7 @@ router.post('/users', async (req, res) => {
       return res.status(400).json({ message: 'Please enter a valid email address' });
     }
 
-    const validRole = role === 'admin' ? 'admin' : 'user';
+    const validRole = ['admin', 'manager'].includes(role) ? role : 'user';
     const nameStr = String(name || '').trim();
     const mobileStr = String(mobile || '').trim().replace(/\D/g, '').slice(0, 10);
 
@@ -54,7 +50,7 @@ router.post('/users', async (req, res) => {
     delete userObj.otpExpiry;
 
     res.status(201).json({
-      message: `${validRole === 'admin' ? 'Admin' : 'User'} created successfully`,
+      message: `${validRole === 'admin' ? 'Admin' : validRole === 'manager' ? 'Manager' : 'User'} created successfully`,
       user: userObj,
     });
   } catch (error) {
@@ -66,7 +62,7 @@ router.post('/users', async (req, res) => {
 // @route   GET /api/admin/users
 // @desc    Get all users
 // @access  Admin
-router.get('/users', async (req, res) => {
+router.get('/users', protect, staffOnly, async (req, res) => {
   try {
     const users = await User.find({ role: 'user' })
       .select('-otp -otpExpiry')
@@ -93,9 +89,9 @@ router.get('/users', async (req, res) => {
 // @route   GET /api/admin/admins
 // @desc    Get all admins
 // @access  Admin
-router.get('/admins', async (req, res) => {
+router.get('/admins', protect, staffOnly, async (req, res) => {
   try {
-    const admins = await User.find({ role: 'admin' })
+    const admins = await User.find({ role: { $in: ['admin', 'manager'] } })
       .select('-otp -otpExpiry')
       .sort({ createdAt: -1 });
     const adminsList = admins.map((a) => ({
@@ -113,7 +109,7 @@ router.get('/admins', async (req, res) => {
 // @route   GET /api/admin/users/:id
 // @desc    Get user details with loans
 // @access  Admin
-router.get('/users/:id', async (req, res) => {
+router.get('/users/:id', protect, staffOnly, async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select('-otp -otpExpiry');
 
@@ -139,10 +135,83 @@ router.get('/users/:id', async (req, res) => {
   }
 });
 
+// @route   PUT /api/admin/users/:id
+// @desc    Update user info (name, mobile, role, address)
+// @access  Admin
+router.put('/users/:id', protect, adminOnly, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const { name, mobile, role, address } = req.body;
+    if (name !== undefined) user.name = String(name).trim();
+    if (mobile !== undefined) user.mobile = String(mobile).trim().replace(/\D/g, '').slice(0, 10);
+    if (address !== undefined) user.address = String(address).trim();
+
+    // Role change
+    if (role && role !== user.role) {
+      if (role === 'user' && user.role === 'admin') {
+        const adminCount = await User.countDocuments({ role: 'admin' });
+        if (adminCount <= 1) {
+          return res.status(400).json({ message: 'Cannot change role. At least one admin is required.' });
+        }
+      }
+      user.role = ['admin', 'manager'].includes(role) ? role : 'user';
+    }
+
+    await user.save();
+    const userObj = user.toObject();
+    delete userObj.otp;
+    delete userObj.otpExpiry;
+    res.json({ message: 'User updated successfully', user: userObj });
+  } catch (error) {
+    console.error('Update user error:', error);
+    res.status(500).json({ message: error.message || 'Error updating user' });
+  }
+});
+
+// @route   DELETE /api/admin/users/:id
+// @desc    Delete a user and all their associated loans, EMIs, and notifications
+// @access  Admin
+router.delete('/users/:id', protect, adminOnly, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Prevent self-delete
+    if (user._id.toString() === req.user._id.toString()) {
+      return res.status(400).json({ message: 'You cannot delete your own account' });
+    }
+
+    // Prevent deleting admin if only 1 admin remains
+    if (user.role === 'admin') {
+      const adminCount = await User.countDocuments({ role: 'admin' });
+      if (adminCount <= 1) {
+        return res.status(400).json({ message: 'Cannot delete the last admin. At least one admin is required.' });
+      }
+    }
+
+    // Cascade delete: EMIs → Notifications → Loans → User
+    await EMI.deleteMany({ userId: user._id });
+    await Notification.deleteMany({ userId: user._id });
+    await Loan.deleteMany({ userId: user._id });
+    await User.deleteOne({ _id: user._id });
+
+    res.json({ message: 'User and all associated data deleted successfully' });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({ message: 'Error deleting user' });
+  }
+});
+
 // @route   GET /api/admin/loans/pending
 // @desc    Get all pending loan applications
 // @access  Admin
-router.get('/loans/pending', async (req, res) => {
+router.get('/loans/pending', protect, staffOnly, async (req, res) => {
   try {
     const pendingLoans = await Loan.find({ status: 'pending' })
       .populate('userId', 'email mobile name')
@@ -158,7 +227,7 @@ router.get('/loans/pending', async (req, res) => {
 // @route   PUT /api/admin/loans/:id/approve
 // @desc    Approve a loan application (admin can change amount and totalDays)
 // @access  Admin
-router.put('/loans/:id/approve', async (req, res) => {
+router.put('/loans/:id/approve', protect, adminOnly, async (req, res) => {
   try {
     const { amount, totalDays } = req.body;
     const loan = await Loan.findById(req.params.id);
@@ -221,7 +290,7 @@ router.put('/loans/:id/approve', async (req, res) => {
 // @route   PUT /api/admin/loans/:id/reject
 // @desc    Reject a loan application
 // @access  Admin
-router.put('/loans/:id/reject', async (req, res) => {
+router.put('/loans/:id/reject', protect, adminOnly, async (req, res) => {
   try {
     const { reason } = req.body;
 
@@ -261,7 +330,7 @@ router.put('/loans/:id/reject', async (req, res) => {
 // @route   POST /api/admin/process-overdues
 // @desc    Admin manually processes overdue EMIs (marks overdue + applies penalty)
 // @access  Admin
-router.post('/process-overdues', async (req, res) => {
+router.post('/process-overdues', protect, staffOnly, async (req, res) => {
   try {
     const count = await processOverdueEMIs();
     res.json({ message: `Processed ${count} overdue EMI(s)`, count });
@@ -274,7 +343,7 @@ router.post('/process-overdues', async (req, res) => {
 // @route   GET /api/admin/emis/today
 // @desc    Get today's EMIs for all users
 // @access  Admin
-router.get('/emis/today', async (req, res) => {
+router.get('/emis/today', protect, staffOnly, async (req, res) => {
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -308,7 +377,7 @@ router.get('/emis/today', async (req, res) => {
 // @route   GET /api/admin/emis/total
 // @desc    Get total EMI statistics
 // @access  Admin
-router.get('/emis/total', async (req, res) => {
+router.get('/emis/total', protect, staffOnly, async (req, res) => {
   try {
     const allEMIs = await EMI.find();
 
@@ -341,7 +410,7 @@ router.get('/emis/total', async (req, res) => {
 // @route   PUT /api/admin/emis/:id/mark-paid
 // @desc    Admin marks EMI as paid
 // @access  Admin
-router.put('/emis/:id/mark-paid', async (req, res) => {
+router.put('/emis/:id/mark-paid', protect, staffOnly, async (req, res) => {
   try {
     const emi = await EMI.findById(req.params.id);
     if (!emi) return res.status(404).json({ message: 'EMI not found' });
@@ -361,7 +430,8 @@ router.put('/emis/:id/mark-paid', async (req, res) => {
       await loan.save();
     }
 
-    const notif = await Notification.create({
+    // Notify admin
+    const adminNotif = await Notification.create({
       type: 'emi_paid',
       forAdmin: true,
       userId: emi.userId,
@@ -371,8 +441,20 @@ router.put('/emis/:id/mark-paid', async (req, res) => {
       body: `Day ${emi.dayNumber} EMI - ₹${emi.totalAmount} marked paid by Admin for ${loan?.applicantName || 'User'}`,
     });
 
+    // Notify the user
+    const userNotif = await Notification.create({
+      type: 'emi_paid',
+      forAdmin: false,
+      userId: emi.userId,
+      loanId: emi.loanId,
+      emiId: emi._id,
+      title: 'EMI Payment Received',
+      body: `Your Day ${emi.dayNumber} EMI of ₹${emi.totalAmount} has been received. Thank you!`,
+    });
+
     const { emitNotification } = require('../socket');
-    await emitNotification(notif);
+    await emitNotification(adminNotif);
+    await emitNotification(userNotif);
     res.json({ message: 'EMI marked as paid', emi });
   } catch (error) {
     console.error('Mark paid error:', error);
@@ -383,7 +465,7 @@ router.put('/emis/:id/mark-paid', async (req, res) => {
 // @route   PUT /api/admin/emis/:id/clear-overdue
 // @desc    Admin waives overdue penalty for an EMI (admin only)
 // @access  Admin
-router.put('/emis/:id/clear-overdue', async (req, res) => {
+router.put('/emis/:id/clear-overdue', protect, staffOnly, async (req, res) => {
   try {
     const emi = await EMI.findById(req.params.id);
     if (!emi) return res.status(404).json({ message: 'EMI not found' });
@@ -411,7 +493,7 @@ router.put('/emis/:id/clear-overdue', async (req, res) => {
 // @route   DELETE /api/admin/loans/:id
 // @desc    Delete a loan (with confirmation - caller must confirm)
 // @access  Admin
-router.delete('/loans/:id', async (req, res) => {
+router.delete('/loans/:id', protect, adminOnly, async (req, res) => {
   try {
     const loan = await Loan.findById(req.params.id);
     if (!loan) return res.status(404).json({ message: 'Loan not found' });
@@ -429,7 +511,7 @@ router.delete('/loans/:id', async (req, res) => {
 // @route   GET /api/admin/dashboard
 // @desc    Get admin dashboard summary
 // @access  Admin
-router.get('/dashboard', async (req, res) => {
+router.get('/dashboard', protect, staffOnly, async (req, res) => {
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -489,7 +571,7 @@ router.get('/dashboard', async (req, res) => {
 // @route   GET /api/admin/emis
 // @desc    Get EMIs with flexible filtering (status, date range, user)
 // @access  Admin
-router.get('/emis', async (req, res) => {
+router.get('/emis', protect, staffOnly, async (req, res) => {
   try {
     const { status, startDate, endDate, userIds, page = 1, limit = 20 } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -570,7 +652,7 @@ const SETTINGS_DEFAULTS = { upiId: '9530305519-9@axl', upiNumber: '9530305519', 
 // @route   GET /api/admin/settings
 // @desc    Get app settings (admin)
 // @access  Admin
-router.get('/settings', async (req, res) => {
+router.get('/settings', protect, staffOnly, async (req, res) => {
   try {
     let settings = await AppSettings.findOne();
     if (!settings) {
@@ -588,7 +670,7 @@ router.get('/settings', async (req, res) => {
 // @route   PUT /api/admin/settings
 // @desc    Update app settings (admin)
 // @access  Admin
-router.put('/settings', async (req, res) => {
+router.put('/settings', protect, adminOnly, async (req, res) => {
   try {
     const { qrImageBase64, upiId, upiNumber, supportNumber, helpText } = req.body;
     const update = {};

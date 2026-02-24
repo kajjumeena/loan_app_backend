@@ -41,4 +41,13 @@ const adminOnly = (req, res, next) => {
   }
 };
 
-module.exports = { protect, adminOnly };
+// Staff only middleware (admin or manager)
+const staffOnly = (req, res, next) => {
+  if (req.user && (req.user.role === 'admin' || req.user.role === 'manager')) {
+    next();
+  } else {
+    return res.status(403).json({ message: 'Access denied. Staff only.' });
+  }
+};
+
+module.exports = { protect, adminOnly, staffOnly };
