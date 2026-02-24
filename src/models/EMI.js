@@ -48,6 +48,14 @@ const emiSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  paymentRequested: {
+    type: Boolean,
+    default: false
+  },
+  paymentRequestedAt: {
+    type: Date,
+    default: null
+  },
   paidAt: {
     type: Date,
     default: null

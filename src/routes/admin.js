@@ -418,6 +418,7 @@ router.put('/emis/:id/mark-paid', protect, staffOnly, async (req, res) => {
 
     emi.status = 'paid';
     emi.paidAt = new Date();
+    emi.paymentRequested = false;
     emi.razorpayPaymentId = `admin_${req.user._id}_${Date.now()}`;
     await emi.save();
 

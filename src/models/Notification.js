@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const notificationSchema = new mongoose.Schema({
   type: {
     type: String,
-    enum: ['loan_request', 'loan_approved', 'loan_rejected', 'emi_paid', 'emi_pending_today', 'emi_overdue'],
+    enum: ['loan_request', 'loan_approved', 'loan_rejected', 'emi_paid', 'emi_pending_today', 'emi_overdue', 'emi_payment_request'],
     required: true,
   },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

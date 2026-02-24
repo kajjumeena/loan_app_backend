@@ -1,6 +1,7 @@
 const express = require('express');
 const EMI = require('../models/EMI');
 const Loan = require('../models/Loan');
+const Notification = require('../models/Notification');
 const { protect } = require('../middleware/auth');
 
 const router = express.Router();
@@ -112,6 +113,67 @@ router.get('/:id', protect, async (req, res) => {
   } catch (error) {
     console.error('Get EMI error:', error);
     res.status(500).json({ message: 'Error fetching EMI details' });
+  }
+});
+
+// @route   POST /api/emi/:id/request-payment
+// @desc    User requests payment verification for an EMI (after paying via UPI)
+// @access  Private
+router.post('/:id/request-payment', protect, async (req, res) => {
+  try {
+    const emi = await EMI.findById(req.params.id);
+    if (!emi) return res.status(404).json({ message: 'EMI not found' });
+
+    // Check ownership
+    if (emi.userId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    if (emi.status === 'paid') {
+      return res.status(400).json({ message: 'EMI is already paid' });
+    }
+
+    if (emi.paymentRequested) {
+      return res.status(400).json({ message: 'Payment verification already requested' });
+    }
+
+    emi.paymentRequested = true;
+    emi.paymentRequestedAt = new Date();
+    await emi.save();
+
+    const loan = await Loan.findById(emi.loanId);
+
+    // Create admin notification
+    const adminNotif = await Notification.create({
+      type: 'emi_payment_request',
+      forAdmin: true,
+      userId: emi.userId,
+      loanId: emi.loanId,
+      emiId: emi._id,
+      title: 'EMI Payment Request',
+      body: `${loan?.applicantName || 'User'} claims to have paid Day ${emi.dayNumber} EMI of ₹${emi.totalAmount}. Please verify.`,
+    });
+
+    // Create user confirmation notification
+    const userNotif = await Notification.create({
+      type: 'emi_payment_request',
+      forAdmin: false,
+      userId: emi.userId,
+      loanId: emi.loanId,
+      emiId: emi._id,
+      title: 'Payment Request Sent',
+      body: `Your payment request for Day ${emi.dayNumber} EMI of ₹${emi.totalAmount} has been sent to admin for verification.`,
+    });
+
+    // Send push notifications via socket
+    const { emitNotification } = require('../socket');
+    await emitNotification(adminNotif);
+    await emitNotification(userNotif);
+
+    res.json({ message: 'Payment request sent to admin', emi });
+  } catch (error) {
+    console.error('Request payment error:', error);
+    res.status(500).json({ message: 'Error requesting payment verification' });
   }
 });
 
