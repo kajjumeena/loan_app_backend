@@ -23,7 +23,10 @@ router.get('/unread-count', async (req, res) => {
 // GET /api/notifications - user notifications (forAdmin: false, userId = current user)
 router.get('/', async (req, res) => {
   try {
-    const { filter } = req.query;
+    const { filter, page = 1 } = req.query;
+    const limit = 20;
+    const skip = (parseInt(page) - 1) * limit;
+
     let query = { userId: req.user._id, forAdmin: false };
     if (filter === 'payments') query.type = 'emi_paid';
     if (filter === 'requests') query.type = 'emi_payment_request';
@@ -31,8 +34,15 @@ router.get('/', async (req, res) => {
     // Legacy support
     if (filter === 'paid') query.type = 'emi_paid';
     if (filter === 'pending') query.$or = [{ type: 'emi_pending_today' }, { type: 'emi_overdue' }];
-    const notifications = await Notification.find(query).sort({ createdAt: -1 }).limit(50).lean();
-    res.json(notifications);
+
+    const total = await Notification.countDocuments(query);
+    const notifications = await Notification.find(query)
+      .sort({ read: 1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    res.json({ data: notifications, hasMore: skip + notifications.length < total, page: parseInt(page) });
   } catch (e) {
     res.status(500).json({ message: 'Error fetching notifications' });
   }
@@ -42,7 +52,10 @@ router.get('/', async (req, res) => {
 router.get('/admin', async (req, res) => {
   try {
     if (req.user.role !== 'admin' && req.user.role !== 'manager') return res.status(403).json({ message: 'Forbidden' });
-    const { filter } = req.query;
+    const { filter, page = 1 } = req.query;
+    const limit = 20;
+    const skip = (parseInt(page) - 1) * limit;
+
     let query = { forAdmin: true };
     if (filter === 'requests') query.type = 'emi_payment_request';
     if (filter === 'payments') query.type = 'emi_paid';
@@ -50,11 +63,17 @@ router.get('/admin', async (req, res) => {
     // Legacy support
     if (filter === 'paid') query.type = 'emi_paid';
     if (filter === 'pending') query.$or = [{ type: 'loan_request' }, { type: 'emi_pending_today' }, { type: 'emi_overdue' }];
-    const notifications = await Notification.find(query).sort({ createdAt: -1 }).limit(50)
+
+    const total = await Notification.countDocuments(query);
+    const notifications = await Notification.find(query)
+      .sort({ read: 1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
       .populate('userId', 'name email mobile')
-      .populate('loanId', 'amount applicantName')
+      .populate('loanId', 'amount applicantName status')
       .lean();
-    res.json(notifications);
+
+    res.json({ data: notifications, hasMore: skip + notifications.length < total, page: parseInt(page) });
   } catch (e) {
     res.status(500).json({ message: 'Error fetching notifications' });
   }

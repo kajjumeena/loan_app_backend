@@ -67,9 +67,11 @@ const processOverdueEMIs = async () => {
 
   // $lt: today means only EMIs whose due date is BEFORE today (not including today).
   // So an EMI due on 16th Feb won't be overdue on 16th Feb; it becomes overdue on 17th.
+  // Skip EMIs where paymentRequested = true (user claims paid, waiting for admin approval)
   const lateEMIs = await EMI.find({
     status: { $in: ['pending', 'overdue'] },
-    dueDate: { $lt: today }
+    dueDate: { $lt: today },
+    paymentRequested: { $ne: true }
   });
 
   let processedCount = 0;

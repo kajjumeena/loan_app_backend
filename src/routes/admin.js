@@ -227,7 +227,7 @@ router.get('/loans/pending', protect, staffOnly, async (req, res) => {
 // @route   PUT /api/admin/loans/:id/approve
 // @desc    Approve a loan application (admin can change amount and totalDays)
 // @access  Admin
-router.put('/loans/:id/approve', protect, adminOnly, async (req, res) => {
+router.put('/loans/:id/approve', protect, staffOnly, async (req, res) => {
   try {
     const { amount, totalDays } = req.body;
     const loan = await Loan.findById(req.params.id);
@@ -290,7 +290,7 @@ router.put('/loans/:id/approve', protect, adminOnly, async (req, res) => {
 // @route   PUT /api/admin/loans/:id/reject
 // @desc    Reject a loan application
 // @access  Admin
-router.put('/loans/:id/reject', protect, adminOnly, async (req, res) => {
+router.put('/loans/:id/reject', protect, staffOnly, async (req, res) => {
   try {
     const { reason } = req.body;
 
@@ -479,6 +479,32 @@ router.put('/emis/:id/cancel-request', protect, staffOnly, async (req, res) => {
     emi.paymentRequested = false;
     emi.requestCanceled = true;
     emi.requestCanceledAt = new Date();
+
+    // If due date has passed, immediately mark as overdue and calculate penalty
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dueDate = new Date(emi.dueDate);
+    dueDate.setHours(0, 0, 0, 0);
+
+    if (dueDate < today) {
+      const daysOverdue = Math.floor((today.getTime() - dueDate.getTime()) / (24 * 60 * 60 * 1000));
+      if (daysOverdue > 0) {
+        emi.status = 'overdue';
+        const penaltyPerDay = Math.ceil(emi.principalAmount / 2);
+        const newPenalty = penaltyPerDay * daysOverdue;
+        const oldPenalty = emi.penaltyAmount || 0;
+        emi.penaltyAmount = newPenalty;
+        emi.totalAmount = emi.principalAmount + emi.interestAmount + newPenalty;
+
+        // Update loan-level penalty
+        if (newPenalty !== oldPenalty) {
+          await Loan.findByIdAndUpdate(emi.loanId, {
+            $inc: { penaltyAmount: newPenalty - oldPenalty }
+          });
+        }
+      }
+    }
+
     await emi.save();
 
     const loan = await Loan.findById(emi.loanId);
