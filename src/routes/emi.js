@@ -185,6 +185,8 @@ router.post('/:id/request-payment', protect, async (req, res) => {
     await emi.save();
 
     const loan = await Loan.findById(emi.loanId);
+    const emiDate = emi.dueDate ? new Date(emi.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    const dayLabel = `Day ${emi.dayNumber}${emiDate ? ` (${emiDate})` : ''}`;
 
     // Create admin notification
     const adminNotif = await Notification.create({
@@ -194,7 +196,7 @@ router.post('/:id/request-payment', protect, async (req, res) => {
       loanId: emi.loanId,
       emiId: emi._id,
       title: 'EMI Payment Request',
-      body: `${loan?.applicantName || 'User'} claims to have paid Day ${emi.dayNumber} EMI of ₹${emi.totalAmount}. Please verify.`,
+      body: `${loan?.applicantName || 'User'} claims to have paid ${dayLabel} EMI of ₹${emi.totalAmount}. Please verify.`,
     });
 
     // Create user confirmation notification
@@ -205,7 +207,7 @@ router.post('/:id/request-payment', protect, async (req, res) => {
       loanId: emi.loanId,
       emiId: emi._id,
       title: 'Payment Request Sent',
-      body: `Your payment request for Day ${emi.dayNumber} EMI of ₹${emi.totalAmount} has been sent to admin for verification.`,
+      body: `Your payment request for ${dayLabel} EMI of ₹${emi.totalAmount} has been sent to admin for verification.`,
     });
 
     // Send push notifications via socket

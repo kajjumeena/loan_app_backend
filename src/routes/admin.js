@@ -434,6 +434,9 @@ router.put('/emis/:id/mark-paid', protect, staffOnly, async (req, res) => {
       await loan.save();
     }
 
+    const emiDate = emi.dueDate ? new Date(emi.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    const dayLabel = `Day ${emi.dayNumber}${emiDate ? ` (${emiDate})` : ''}`;
+
     // Notify admin
     const adminNotif = await Notification.create({
       type: 'emi_paid',
@@ -442,7 +445,7 @@ router.put('/emis/:id/mark-paid', protect, staffOnly, async (req, res) => {
       loanId: emi.loanId,
       emiId: emi._id,
       title: 'EMI Paid (Admin Manual)',
-      body: `Day ${emi.dayNumber} EMI - ₹${emi.totalAmount} marked paid by Admin for ${loan?.applicantName || 'User'}`,
+      body: `${dayLabel} EMI - ₹${emi.totalAmount} marked paid by Admin for ${loan?.applicantName || 'User'}`,
     });
 
     // Notify the user
@@ -453,7 +456,7 @@ router.put('/emis/:id/mark-paid', protect, staffOnly, async (req, res) => {
       loanId: emi.loanId,
       emiId: emi._id,
       title: 'EMI Payment Received',
-      body: `Your Day ${emi.dayNumber} EMI of ₹${emi.totalAmount} has been received. Thank you!`,
+      body: `Your ${dayLabel} EMI of ₹${emi.totalAmount} has been received. Thank you!`,
     });
 
     const { emitNotification } = require('../socket');
@@ -508,6 +511,8 @@ router.put('/emis/:id/cancel-request', protect, staffOnly, async (req, res) => {
     await emi.save();
 
     const loan = await Loan.findById(emi.loanId);
+    const cancelEmiDate = emi.dueDate ? new Date(emi.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    const cancelDayLabel = `Day ${emi.dayNumber}${cancelEmiDate ? ` (${cancelEmiDate})` : ''}`;
 
     // Notify user that request was canceled
     const userNotif = await Notification.create({
@@ -517,7 +522,7 @@ router.put('/emis/:id/cancel-request', protect, staffOnly, async (req, res) => {
       loanId: emi.loanId,
       emiId: emi._id,
       title: 'Payment Request Canceled',
-      body: `Your payment request for Day ${emi.dayNumber} EMI of ₹${emi.totalAmount} was not approved. You can request again after payment.`,
+      body: `Your payment request for ${cancelDayLabel} EMI of ₹${emi.totalAmount} was not approved. You can request again after payment.`,
     });
 
     const { emitNotification } = require('../socket');

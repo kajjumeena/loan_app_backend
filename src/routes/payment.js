@@ -76,6 +76,9 @@ router.post('/simulate', protect, async (req, res) => {
 
       await loan.save();
 
+      const simEmiDate = emi.dueDate ? new Date(emi.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+      const simDayLabel = `Day ${emi.dayNumber}${simEmiDate ? ` (${simEmiDate})` : ''}`;
+
       const notif = await Notification.create({
         type: 'emi_paid',
         forAdmin: true,
@@ -83,7 +86,7 @@ router.post('/simulate', protect, async (req, res) => {
         loanId: emi.loanId,
         emiId: emi._id,
         title: 'EMI Paid (Simulated)',
-        body: `Day ${emi.dayNumber} EMI - ₹${emi.totalAmount} paid by ${req.user.name || 'User'}`,
+        body: `${simDayLabel} EMI - ₹${emi.totalAmount} paid by ${req.user.name || 'User'}`,
       });
 
       const { emitNotification } = require('../socket');
@@ -257,6 +260,9 @@ router.post('/verify', protect, async (req, res) => {
 
       await loan.save();
 
+      const verifyEmiDate = emi.dueDate ? new Date(emi.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+      const verifyDayLabel = `Day ${emi.dayNumber}${verifyEmiDate ? ` (${verifyEmiDate})` : ''}`;
+
       const notif = await Notification.create({
         type: 'emi_paid',
         forAdmin: true,
@@ -264,7 +270,7 @@ router.post('/verify', protect, async (req, res) => {
         loanId: emi.loanId,
         emiId: emi._id,
         title: 'EMI Paid',
-        body: `Day ${emi.dayNumber} EMI - ₹${emi.totalAmount} paid by ${req.user.name || 'User'}`,
+        body: `${verifyDayLabel} EMI - ₹${emi.totalAmount} paid by ${req.user.name || 'User'}`,
       });
 
       const { emitNotification } = require('../socket');
