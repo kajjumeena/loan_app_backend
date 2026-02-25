@@ -47,6 +47,47 @@ router.get('/today', protect, async (req, res) => {
   }
 });
 
+// @route   GET /api/emi/my-requested
+// @desc    Get user's pending payment requests
+// @access  Private
+router.get('/my-requested', protect, async (req, res) => {
+  try {
+    const emis = await EMI.find({
+      userId: req.user._id,
+      paymentRequested: true,
+      status: { $ne: 'paid' }
+    })
+      .populate('loanId', 'amount applicantName')
+      .sort({ paymentRequestedAt: -1 });
+
+    res.json(emis);
+  } catch (error) {
+    console.error('My requested EMIs error:', error);
+    res.status(500).json({ message: 'Error fetching requested EMIs' });
+  }
+});
+
+// @route   GET /api/emi/my-recently-completed
+// @desc    Get user's recently completed EMI requests
+// @access  Private
+router.get('/my-recently-completed', protect, async (req, res) => {
+  try {
+    const emis = await EMI.find({
+      userId: req.user._id,
+      paidViaRequest: true,
+      status: 'paid'
+    })
+      .populate('loanId', 'amount applicantName')
+      .sort({ paidAt: -1 })
+      .limit(20);
+
+    res.json(emis);
+  } catch (error) {
+    console.error('My recently completed EMIs error:', error);
+    res.status(500).json({ message: 'Error fetching recently completed EMIs' });
+  }
+});
+
 // @route   GET /api/emi/loan/:loanId
 // @desc    Get EMIs for a specific loan with pagination
 // @access  Private
@@ -139,6 +180,8 @@ router.post('/:id/request-payment', protect, async (req, res) => {
 
     emi.paymentRequested = true;
     emi.paymentRequestedAt = new Date();
+    emi.requestCanceled = false;
+    emi.requestCanceledAt = null;
     await emi.save();
 
     const loan = await Loan.findById(emi.loanId);

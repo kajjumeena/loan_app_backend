@@ -56,6 +56,18 @@ const emiSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  requestCanceled: {
+    type: Boolean,
+    default: false
+  },
+  requestCanceledAt: {
+    type: Date,
+    default: null
+  },
+  paidViaRequest: {
+    type: Boolean,
+    default: false
+  },
   paidAt: {
     type: Date,
     default: null

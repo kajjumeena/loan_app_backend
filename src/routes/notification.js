@@ -9,7 +9,7 @@ router.use(protect);
 // GET /api/notifications/unread-count
 router.get('/unread-count', async (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'manager';
     const query = isAdmin
       ? { forAdmin: true, read: { $ne: true } }
       : { userId: req.user._id, forAdmin: false, read: { $ne: true } };
@@ -23,8 +23,12 @@ router.get('/unread-count', async (req, res) => {
 // GET /api/notifications - user notifications (forAdmin: false, userId = current user)
 router.get('/', async (req, res) => {
   try {
-    const { filter } = req.query; // 'paid' | 'pending' | null for all
+    const { filter } = req.query;
     let query = { userId: req.user._id, forAdmin: false };
+    if (filter === 'payments') query.type = 'emi_paid';
+    if (filter === 'requests') query.type = 'emi_payment_request';
+    if (filter === 'loans') query.type = { $in: ['loan_approved', 'loan_rejected', 'loan_request'] };
+    // Legacy support
     if (filter === 'paid') query.type = 'emi_paid';
     if (filter === 'pending') query.$or = [{ type: 'emi_pending_today' }, { type: 'emi_overdue' }];
     const notifications = await Notification.find(query).sort({ createdAt: -1 }).limit(50).lean();
@@ -37,9 +41,13 @@ router.get('/', async (req, res) => {
 // GET /api/notifications/admin - admin notifications
 router.get('/admin', async (req, res) => {
   try {
-    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    if (req.user.role !== 'admin' && req.user.role !== 'manager') return res.status(403).json({ message: 'Forbidden' });
     const { filter } = req.query;
     let query = { forAdmin: true };
+    if (filter === 'requests') query.type = 'emi_payment_request';
+    if (filter === 'payments') query.type = 'emi_paid';
+    if (filter === 'loans') query.type = { $in: ['loan_request', 'loan_approved', 'loan_rejected'] };
+    // Legacy support
     if (filter === 'paid') query.type = 'emi_paid';
     if (filter === 'pending') query.$or = [{ type: 'loan_request' }, { type: 'emi_pending_today' }, { type: 'emi_overdue' }];
     const notifications = await Notification.find(query).sort({ createdAt: -1 }).limit(50)

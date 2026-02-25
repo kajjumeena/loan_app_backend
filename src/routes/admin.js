@@ -416,9 +416,12 @@ router.put('/emis/:id/mark-paid', protect, staffOnly, async (req, res) => {
     if (!emi) return res.status(404).json({ message: 'EMI not found' });
     if (emi.status === 'paid') return res.status(400).json({ message: 'EMI already paid' });
 
+    const wasRequested = emi.paymentRequested;
     emi.status = 'paid';
     emi.paidAt = new Date();
     emi.paymentRequested = false;
+    emi.requestCanceled = false;
+    if (wasRequested) emi.paidViaRequest = true;
     emi.razorpayPaymentId = `admin_${req.user._id}_${Date.now()}`;
     await emi.save();
 
@@ -460,6 +463,85 @@ router.put('/emis/:id/mark-paid', protect, staffOnly, async (req, res) => {
   } catch (error) {
     console.error('Mark paid error:', error);
     res.status(500).json({ message: 'Error marking EMI as paid' });
+  }
+});
+
+// @route   PUT /api/admin/emis/:id/cancel-request
+// @desc    Admin cancels a payment request
+// @access  Admin
+router.put('/emis/:id/cancel-request', protect, staffOnly, async (req, res) => {
+  try {
+    const emi = await EMI.findById(req.params.id);
+    if (!emi) return res.status(404).json({ message: 'EMI not found' });
+    if (emi.status === 'paid') return res.status(400).json({ message: 'EMI already paid' });
+    if (!emi.paymentRequested) return res.status(400).json({ message: 'No payment request to cancel' });
+
+    emi.paymentRequested = false;
+    emi.requestCanceled = true;
+    emi.requestCanceledAt = new Date();
+    await emi.save();
+
+    const loan = await Loan.findById(emi.loanId);
+
+    // Notify user that request was canceled
+    const userNotif = await Notification.create({
+      type: 'emi_payment_request',
+      forAdmin: false,
+      userId: emi.userId,
+      loanId: emi.loanId,
+      emiId: emi._id,
+      title: 'Payment Request Canceled',
+      body: `Your payment request for Day ${emi.dayNumber} EMI of ₹${emi.totalAmount} was not approved. You can request again after payment.`,
+    });
+
+    const { emitNotification } = require('../socket');
+    await emitNotification(userNotif);
+
+    res.json({ message: 'Payment request canceled', emi });
+  } catch (error) {
+    console.error('Cancel request error:', error);
+    res.status(500).json({ message: 'Error canceling payment request' });
+  }
+});
+
+// @route   GET /api/admin/emis/requested
+// @desc    Get all EMIs with pending payment requests
+// @access  Admin
+router.get('/emis/requested', protect, staffOnly, async (req, res) => {
+  try {
+    const emis = await EMI.find({
+      paymentRequested: true,
+      status: { $ne: 'paid' }
+    })
+      .populate('userId', 'email mobile name')
+      .populate('loanId', 'amount applicantName')
+      .sort({ paymentRequestedAt: -1 });
+
+    res.json(emis);
+  } catch (error) {
+    console.error('Get requested EMIs error:', error);
+    res.status(500).json({ message: 'Error fetching requested EMIs' });
+  }
+});
+
+// @route   GET /api/admin/emis/recently-completed
+// @desc    Get recently completed EMI requests (paid via request)
+// @access  Admin
+router.get('/emis/recently-completed', protect, staffOnly, async (req, res) => {
+  try {
+    const emis = await EMI.find({
+      paidViaRequest: true,
+      status: 'paid'
+    })
+      .populate('userId', 'email mobile name')
+      .populate('loanId', 'amount applicantName')
+      .sort({ paidAt: -1 })
+      .limit(50);
+
+    res.json(emis);
+  } catch (error) {
+    console.error('Get recently completed EMIs error:', error);
+    res.status(500).json({ message: 'Error fetching recently completed EMIs' });
   }
 });
 
