@@ -345,6 +345,7 @@ router.post('/process-overdues', protect, staffOnly, async (req, res) => {
 // @access  Admin
 router.get('/emis/today', protect, staffOnly, async (req, res) => {
   try {
+    await processOverdueEMIs().catch(e => console.error('Auto-overdue error:', e));
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -687,6 +688,9 @@ router.get('/dashboard', protect, staffOnly, async (req, res) => {
 // @access  Admin
 router.get('/emis', protect, staffOnly, async (req, res) => {
   try {
+    // Auto-process overdue EMIs on every admin fetch (Render free tier cron may not fire)
+    await processOverdueEMIs().catch(e => console.error('Auto-overdue error:', e));
+
     const { status, startDate, endDate, userIds, page = 1, limit = 20 } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
     let query = {};

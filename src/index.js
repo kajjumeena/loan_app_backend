@@ -63,8 +63,8 @@ app.get('/api/config', (req, res) => {
   res.json({ totalDays: 100 });
 });
 
-// Schedule cron job to process overdue EMIs every day at midnight
-cron.schedule('10 0 * * *', async () => {
+// Schedule cron job to process overdue EMIs every day at 12:10 AM IST (18:40 UTC)
+cron.schedule('40 18 * * *', async () => {
   console.log('Running daily overdue EMI processing...');
   try {
     await processOverdueEMIs();
@@ -83,8 +83,15 @@ const PORT = process.env.PORT || 5000;
 const server = http.createServer(app);
 initSocket(server);
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
+  // Process overdue EMIs on server startup (Render free tier may miss cron while sleeping)
+  try {
+    const count = await processOverdueEMIs();
+    console.log(`Startup: processed ${count} overdue EMI(s)`);
+  } catch (e) {
+    console.error('Startup overdue processing error:', e);
+  }
 });
 
 // Graceful shutdown - Railway sends SIGTERM when stopping the container

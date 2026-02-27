@@ -3,6 +3,7 @@ const EMI = require('../models/EMI');
 const Loan = require('../models/Loan');
 const Notification = require('../models/Notification');
 const { protect } = require('../middleware/auth');
+const { processOverdueEMIs } = require('../services/emiCalculator');
 
 const router = express.Router();
 
@@ -11,6 +12,8 @@ const router = express.Router();
 // @access  Private
 router.get('/pending', protect, async (req, res) => {
   try {
+    // Auto-process overdue EMIs to ensure fresh status
+    await processOverdueEMIs().catch(e => console.error('Auto-overdue error:', e));
     const pendingEMIs = await EMI.find({
       userId: req.user._id,
       status: { $in: ['pending', 'overdue'] }
