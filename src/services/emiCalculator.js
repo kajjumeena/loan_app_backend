@@ -13,7 +13,7 @@ const generateEMISchedule = async (loan) => {
   startDate.setDate(startDate.getDate() + 1);
   startDate.setHours(0, 0, 0, 0);
 
-  const totalInterest = loan.amount * 0.20; // 20% of total amount
+  const totalInterest = loan.amount * (loan.interestRate / 100);
   const dailyPrincipal = Math.ceil(loan.amount / loan.totalDays);
   const dailyInterest = Math.ceil(totalInterest / loan.totalDays);
 

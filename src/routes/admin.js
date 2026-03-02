@@ -208,6 +208,71 @@ router.delete('/users/:id', protect, adminOnly, async (req, res) => {
   }
 });
 
+// @route   POST /api/admin/users/:id/create-loan
+// @desc    Admin creates a loan directly for a user (auto-approved)
+// @access  Admin
+router.post('/users/:id/create-loan', protect, adminOnly, async (req, res) => {
+  try {
+    const { amount, interestRate, totalDays } = req.body;
+
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const amt = parseInt(amount);
+    if (isNaN(amt) || amt < 1000 || amt > 100000) {
+      return res.status(400).json({ message: 'Amount must be between ₹1,000 and ₹1,00,000' });
+    }
+
+    const days = parseInt(totalDays) || 100;
+    if (days < 1 || days > 365) {
+      return res.status(400).json({ message: 'Total days must be between 1 and 365' });
+    }
+
+    const rate = parseFloat(interestRate) || 20;
+    if (rate < 1 || rate > 100) {
+      return res.status(400).json({ message: 'Interest rate must be between 1% and 100%' });
+    }
+
+    const loan = new Loan({
+      userId: user._id,
+      amount: amt,
+      totalDays: days,
+      interestRate: rate,
+      status: 'approved',
+      applicantName: user.name || 'N/A',
+      applicantMobile: user.mobile || 'N/A',
+      applicantAddress: user.address || 'N/A',
+      applicantAadhaar: user.aadhaarNumber || 'N/A',
+      applicantPan: user.panNumber || 'N/A',
+    });
+
+    await loan.save();
+    await generateEMISchedule(loan);
+
+    const notif = await Notification.create({
+      type: 'loan_approved',
+      forAdmin: false,
+      userId: user._id,
+      loanId: loan._id,
+      title: 'New Loan Created',
+      body: `A loan of ₹${amt.toLocaleString('en-IN')} has been created for you.`,
+    });
+
+    const { emitNotification } = require('../socket');
+    await emitNotification(notif);
+
+    res.status(201).json({
+      message: 'Loan created successfully',
+      loan,
+    });
+  } catch (error) {
+    console.error('Admin create loan error:', error);
+    res.status(500).json({ message: error.message || 'Error creating loan' });
+  }
+});
+
 // @route   GET /api/admin/loans/pending
 // @desc    Get all pending loan applications
 // @access  Admin
